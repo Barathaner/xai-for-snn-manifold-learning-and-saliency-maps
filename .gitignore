@@ -8,6 +8,7 @@ __pycache__/
 venv
 # Distribution / packaging
 .Python
+venvtorch
 build/
 develop-eggs/
 dist/
