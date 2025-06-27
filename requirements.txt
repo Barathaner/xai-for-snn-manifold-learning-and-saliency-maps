@@ -1,2 +1,10 @@
-brian2
 matplotlib
+numpy
+pandas
+torch
+torchvision 
+torchaudio --index-url https://download.pytorch.org/whl/cu128
+snntorch
+nir
+nirtorch
+torchinfo
