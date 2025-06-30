@@ -6,21 +6,9 @@ from snntorch import utils
 import torch.nn as nn
 import torch
 import torchvision
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
-
-
-# Network Architecture
-num_inputs = 28*28
-num_hidden = 1000
-num_outputs = 10
-
-# Temporal Dynamics
-num_steps = 25
-beta = 0.95
-
 # Define Network
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self,num_inputs,num_hidden,num_outputs,num_steps,beta):
         super().__init__()
 
         # Initialize layers
@@ -28,6 +16,7 @@ class Net(nn.Module):
         self.lif1 = snn.Leaky(beta=beta)
         self.fc2 = nn.Linear(num_hidden, num_outputs)
         self.lif2 = snn.Leaky(beta=beta)
+        self.num_steps=num_steps
 
     def forward(self, x):
 
@@ -39,8 +28,8 @@ class Net(nn.Module):
         spk2_rec = []
         mem2_rec = []
 
-        for step in range(num_steps):
-            cur1 = self.fc1(x)
+        for step in range(self.num_steps):
+            cur1 = self.fc1(x[step])
             spk1, mem1 = self.lif1(cur1, mem1)
             cur2 = self.fc2(spk1)
             spk2, mem2 = self.lif2(cur2, mem2)
@@ -49,5 +38,3 @@ class Net(nn.Module):
 
         return torch.stack(spk2_rec, dim=0), torch.stack(mem2_rec, dim=0)
 
-# Load the network onto CUDA if available
-net = Net().to(device)

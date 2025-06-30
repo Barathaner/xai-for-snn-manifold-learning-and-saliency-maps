@@ -66,3 +66,14 @@ def load_filtered_shd_dataloader(
     )
 
     return dataloader
+
+def load_shd_raw_subset(train=False, label_range=range(0, 9),):
+    dataset_full = tonic.datasets.SHD(save_to="./data", train=train, transform=None)
+
+    label_range = set(label_range)
+    filtered_indices = [
+        i for i in range(len(dataset_full)) if dataset_full[i][1] in label_range
+    ]
+    
+    subset = Subset(dataset_full, filtered_indices)
+    return subset
