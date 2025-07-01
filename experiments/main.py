@@ -36,14 +36,19 @@ loss = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(net.parameters(), lr=5e-4)
 
 if __name__ == "__main__":
-    #training loop
-    num_epoch=3
-    for epoch in range(1, num_epoch+1):
-        print(f"\nEpoch {epoch}")
-        train_one_epoch_batched(net=net,
-                                dataloader=train_dataloader,
-                                optimizer=optimizer,
-                                loss_fn=loss,
-                                device=device)
-    #test val
-    print_full_dataloader_accuracy_batched(net, test_dataloader)
+    # #training loop
+    # num_epoch=3
+    # for epoch in range(1, num_epoch+1):
+    #     print(f"\nEpoch {epoch}")
+    #     train_one_epoch_batched(net=net,
+    #                             dataloader=train_dataloader,
+    #                             optimizer=optimizer,
+    #                             loss_fn=loss,
+    #                             device=device)
+    # #test val
+    # print_full_dataloader_accuracy_batched(net, test_dataloader)
+    # torch.save(net.state_dict(),"./model_export/model_weights.pth")
+    
+    
+    ###########LOADMODEL#############
+    net2 = torch.load
