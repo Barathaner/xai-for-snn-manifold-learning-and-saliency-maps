@@ -39,7 +39,7 @@ optimizer = torch.optim.Adam(net.parameters(), lr=5e-4)
 
 if __name__ == "__main__":
     #training loop
-    num_epoch=3
+    num_epoch=6
     for epoch in range(1, num_epoch+1):
         print(f"\nEpoch {epoch}")
         train_one_epoch_batched(net=net,
@@ -51,12 +51,12 @@ if __name__ == "__main__":
     print_full_dataloader_accuracy_batched(net, test_dataloader)
     
     #export weights
-    torch.save(net.state_dict(),"./model_export/model_weights.pt")
+    torch.save(net.state_dict(),"./model_export/model_weights.pth")
     
     #export NIR Graph for Spinnaker2 simulation on brian2
     net_cpu = net.to("cpu")
     example_input_cpu = torch.rand((1, 250, 350))  # nicht .to(device), sondern CPU!
-    nir_graph = export_to_nir(net_cpu, example_input_cpu, model_name="snntorch")
+    nir_graph = export_to_nir(net_cpu, example_input_cpu,ignore_dims=[0])
     nir.write("./model_export/my_model.nir",nir_graph)
 
     
