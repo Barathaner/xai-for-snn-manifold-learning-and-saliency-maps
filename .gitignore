@@ -12,7 +12,7 @@ __pycache__/
 .idea
 # C extensions
 *.so
-
+cache
 venv
 # Distribution / packaging
 .Python

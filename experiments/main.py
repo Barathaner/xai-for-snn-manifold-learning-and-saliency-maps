@@ -1,26 +1,49 @@
-from tonic.transforms import ToFrame
-from tonic import MemoryCachedDataset
-from tonic.collation import PadTensors
-from torch.utils.data import DataLoader
-from data.dummy_event_based_classification_dataset import DummySpikeDataset
+import sys
+import os
+sys.path.append("/home/karl-/liquidstatemachines")
+import tonic.transforms as transforms
+from data.dataloader import *
+from models.sffnn_batched import *
+from training.trainer import *
+from utils.metrics import *
+#seed for reproduzierbarketi
+import random
+import numpy as np
+torch.manual_seed(42)
+np.random.seed(42)
+random.seed(42)
+# setup for cuda
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
 
-# Dummy-Datensatz erzeugen
-dataset = DummySpikeDataset(num_samples=200, num_events=300)
 
-# Transform
-transform = ToFrame(sensor_size=DummySpikeDataset.sensor_size,
-                    time_window=1_000,
-                    n_time_bins=1000)
+# loading data and preprocessing
+transform = transforms.Compose([
+    transforms.Downsample(spatial_factor=0.5),
+    transforms.ToFrame(
+    sensor_size=(350,1,1),  # = (700,),
+    n_time_bins=250)
+    ])
+train_dataloader=load_filtered_shd_dataloader(label_range=range(0, 10), transform=transform, train=True,batch_size=64)
 
-# In Memory laden + Dataloader
-transformed_dataset = [(transform(e), l) for e, l in dataset]
-cached_dataset = MemoryCachedDataset(transformed_dataset)
+test_dataloader=load_filtered_shd_dataloader(label_range=range(0, 10), transform=transform, train=False,batch_size=64)
 
-loader = DataLoader(cached_dataset, batch_size=32, collate_fn=PadTensors())
 
+#loading model
+net = Net(num_inputs=350, num_hidden=1000, num_outputs=10, num_steps=250, beta=0.9).to(device)
+
+#training parameters
+loss = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(net.parameters(), lr=5e-4)
 
 if __name__ == "__main__":
-    # Test
-    x, y = next(iter(loader))
-    print(x.shape)  # z. B. [32, 1000, 1, 700]
-    print(y)        # Labels: 0 (früh), 1 (spät)
+    #training loop
+    num_epoch=3
+    for epoch in range(1, num_epoch+1):
+        print(f"\nEpoch {epoch}")
+        train_one_epoch_batched(net=net,
+                                dataloader=train_dataloader,
+                                optimizer=optimizer,
+                                loss_fn=loss,
+                                device=device)
+    #test val
+    print_full_dataloader_accuracy_batched(net, test_dataloader)
