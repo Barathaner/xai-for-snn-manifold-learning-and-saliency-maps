@@ -1,6 +1,6 @@
 import sys
 import os
-sys.path.append("/home/karl-/liquidstatemachines")
+sys.path.append("/home/karl-/git/liquidstatemachines")
 import tonic.transforms as transforms
 from data.dataloader import *
 from models.sffnn_batched import *
@@ -8,6 +8,7 @@ from training.trainer import *
 from utils.metrics import *
 from snntorch.export_nir import export_to_nir
 import nir
+from training.callbacks import *
 #seed for reproduzierbarketi
 import random
 import numpy as np
@@ -37,6 +38,9 @@ net = Net(num_inputs=350, num_hidden=1000, num_outputs=10, num_steps=250, beta=0
 loss = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(net.parameters(), lr=5e-4)
 
+# Callbacks
+raster_cb = RasterPlotCallback(dataloader=test_dataloader, device=device, out_dir="./plots", max_neurons_hidden=1000)
+
 if __name__ == "__main__":
     #training loop
     num_epoch=6
@@ -47,6 +51,8 @@ if __name__ == "__main__":
                                 optimizer=optimizer,
                                 loss_fn=loss,
                                 device=device)
+        # Callback: Rasterplots am Ende der Epoche speichern
+        raster_cb.on_epoch_end(net, epoch)
     #test val
     print_full_dataloader_accuracy_batched(net, test_dataloader)
     
