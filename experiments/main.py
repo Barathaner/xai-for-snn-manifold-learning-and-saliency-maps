@@ -1,6 +1,9 @@
 import sys
 import os
-sys.path.append("/home/karl-/liquidstatemachines")
+# Ensure project root is on sys.path regardless of where this script is run from
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 import tonic.transforms as transforms
 from data.dataloader import *
 from models.sffnn_batched import *

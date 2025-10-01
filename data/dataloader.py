@@ -17,7 +17,7 @@ class TransformedDataset(Dataset):
         return self.transform(events), label
 
 def load_filtered_shd_dataloader(
-    label_range=range(0, 9),
+    label_range=range(0, 10),
     transform=None,
     train=True,
     batch_size=32,
