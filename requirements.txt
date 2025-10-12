@@ -8,3 +8,11 @@ snntorch
 nir
 nirtorch
 torchinfo
+fastapi
+uvicorn
+python-multipart
+
+# Testing
+pytest
+pytest-asyncio
+httpx
