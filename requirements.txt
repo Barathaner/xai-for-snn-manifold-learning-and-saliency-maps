@@ -11,8 +11,14 @@ torchinfo
 fastapi
 uvicorn
 python-multipart
-
 # Testing
 pytest
 pytest-asyncio
 httpx
+plotly
+dash 
+tonic
+ipywidgets
+umap-learn
+scikit-learn
+tqdm
