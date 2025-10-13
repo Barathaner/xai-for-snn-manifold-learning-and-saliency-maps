@@ -130,51 +130,29 @@ def update_graph(filename, label, n_samples, viz_type):
         # Trajektorien mit Linien und Farbverlauf
         fig = go.Figure()
         
-        # Colormap für Zeitverlauf (neue Matplotlib API)
-        try:
-            cmap = cm.colormaps['viridis']
-        except AttributeError:
-            # Fallback für ältere Matplotlib Versionen
-            cmap = cm.get_cmap('viridis')
-        
         for idx, sample_id in enumerate(sample_ids):
             sample_df = df[df['sample_id'] == sample_id].sort_values('time_bin')
             label_val = sample_df['label'].iloc[0]
-            n_points = len(sample_df)
             
-            # Normalisiere Zeit für Farbskala
-            time_normalized = sample_df['time_bin'].values / sample_df['time_bin'].max()
-            
-            # Zeichne jedes Segment mit eigener Farbe
-            for j in range(n_points - 1):
-                # Farbe für dieses Segment (Mittelwert der beiden Punkte)
-                t_color = (time_normalized[j] + time_normalized[j+1]) / 2
-                rgba = cmap(t_color)
-                color_str = f'rgb({int(rgba[0]*255)}, {int(rgba[1]*255)}, {int(rgba[2]*255)})'
-                
-                fig.add_trace(go.Scatter3d(
-                    x=sample_df['x'].iloc[j:j+2],
-                    y=sample_df['y'].iloc[j:j+2],
-                    z=sample_df['z'].iloc[j:j+2],
-                    mode='lines',
-                    line=dict(color=color_str, width=3),
-                    showlegend=False,
-                    hoverinfo='skip'
-                ))
-            
-            # Punkte separat zeichnen mit Hover-Info
+            # Linie UND Punkte zusammen - Farbverlauf auf beiden
             fig.add_trace(go.Scatter3d(
                 x=sample_df['x'],
                 y=sample_df['y'],
                 z=sample_df['z'],
-                mode='markers',
+                mode='lines+markers',
                 name=f'Sample {sample_id} (Label {label_val})',
+                line=dict(
+                    color=sample_df['time_bin'].tolist(),  # Farbverlauf auf Linie!
+                    colorscale='Viridis',
+                    width=3
+                ),
                 marker=dict(
                     size=5,
                     color=sample_df['time_bin'].tolist(),
                     colorscale='Viridis',
-                    showscale=bool(idx == 0),  # Nur eine Colorbar - expliziter Python bool
-                    colorbar=dict(title="Zeit", x=1.1)
+                    showscale=bool(idx == 0),  # Nur eine Colorbar
+                    colorbar=dict(title="Zeit", x=1.1),
+                    line=dict(color='white', width=0.5)
                 ),
                 hovertemplate='<b>Sample %{text}</b><br>Zeit: %{marker.color}<br>X: %{x:.2f}<br>Y: %{y:.2f}<br>Z: %{z:.2f}',
                 text=[sample_id] * len(sample_df)
@@ -193,17 +171,151 @@ def update_graph(filename, label, n_samples, viz_type):
         title = f'{method.upper()} - Scatter Plot (farbcodiert nach Label)'
     
     elif viz_type == 'animation':
-        # Animation über Zeit
-        fig = px.scatter_3d(df, 
-                           x='x', y='y', z='z',
-                           animation_frame='time_bin',
-                           animation_group='sample_id',
-                           color='label',
-                           hover_data=['sample_id'],
-                           range_x=[df['x'].min(), df['x'].max()],
-                           range_y=[df['y'].min(), df['y'].max()],
-                           range_z=[df['z'].min(), df['z'].max()])
-        title = f'{method.upper()} - Animation über Zeit'
+        # Animation: Punkt läuft über komplette Linie mit Farbverlauf
+        fig = go.Figure()
+        
+        all_time_bins = sorted(df['time_bin'].unique())
+        
+        # 1. Zeichne alle kompletten Linien mit Farbverlauf (statisch)
+        for sample_id in sample_ids:
+            sample_df = df[df['sample_id'] == sample_id].sort_values('time_bin')
+            label_val = sample_df['label'].iloc[0]
+            
+            # Linie mit Farbverlauf
+            fig.add_trace(go.Scatter3d(
+                x=sample_df['x'],
+                y=sample_df['y'],
+                z=sample_df['z'],
+                mode='lines',
+                line=dict(
+                    color=sample_df['time_bin'].tolist(),  # Farbverlauf!
+                    colorscale='Viridis',
+                    width=2
+                ),
+                showlegend=False,
+                hoverinfo='skip',
+                name=f'Line_{sample_id}'
+            ))
+        
+        # 2. Füge initiale Punkt-Trace hinzu
+        initial_points_x, initial_points_y, initial_points_z = [], [], []
+        initial_colors = []
+        initial_hover = []
+        
+        for sample_id in sample_ids:
+            sample_point = df[(df['sample_id'] == sample_id) & (df['time_bin'] == all_time_bins[0])]
+            if not sample_point.empty:
+                initial_points_x.append(sample_point['x'].iloc[0])
+                initial_points_y.append(sample_point['y'].iloc[0])
+                initial_points_z.append(sample_point['z'].iloc[0])
+                label_val = sample_point['label'].iloc[0]
+                initial_colors.append(label_val)
+                initial_hover.append(f'Sample {sample_id}<br>Zeit: {all_time_bins[0]}<br>Label: {label_val}')
+        
+        fig.add_trace(go.Scatter3d(
+            x=initial_points_x,
+            y=initial_points_y,
+            z=initial_points_z,
+            mode='markers',
+            marker=dict(
+                size=12,
+                color=initial_colors,
+                colorscale='Turbo',
+                line=dict(color='white', width=2),
+                showscale=False
+            ),
+            text=initial_hover,
+            hovertemplate='<b>%{text}</b><br>X: %{x:.2f}<br>Y: %{y:.2f}<br>Z: %{z:.2f}<extra></extra>',
+            name='Aktuelle Position'
+        ))
+        
+        # 3. Erstelle Animations-Frames - Jeder Frame enthält ALLE Traces
+        frames = []
+        
+        for time_bin in all_time_bins:
+            frame_data = []
+            
+            # Füge alle Linien hinzu (gleich bleibend)
+            for sample_id in sample_ids:
+                sample_df = df[df['sample_id'] == sample_id].sort_values('time_bin')
+                
+                frame_data.append(go.Scatter3d(
+                    x=sample_df['x'],
+                    y=sample_df['y'],
+                    z=sample_df['z'],
+                    mode='lines',
+                    line=dict(
+                        color=sample_df['time_bin'].tolist(),
+                        colorscale='Viridis',
+                        width=2
+                    ),
+                    showlegend=False,
+                    hoverinfo='skip'
+                ))
+            
+            # Füge die Punkte für diesen Zeitschritt hinzu
+            points_x, points_y, points_z = [], [], []
+            colors = []
+            hover_texts = []
+            
+            for sample_id in sample_ids:
+                sample_point = df[(df['sample_id'] == sample_id) & (df['time_bin'] == time_bin)]
+                if not sample_point.empty:
+                    points_x.append(sample_point['x'].iloc[0])
+                    points_y.append(sample_point['y'].iloc[0])
+                    points_z.append(sample_point['z'].iloc[0])
+                    label_val = sample_point['label'].iloc[0]
+                    colors.append(label_val)
+                    hover_texts.append(f'Sample {sample_id}<br>Zeit: {time_bin}<br>Label: {label_val}')
+            
+            frame_data.append(go.Scatter3d(
+                x=points_x,
+                y=points_y,
+                z=points_z,
+                mode='markers',
+                marker=dict(
+                    size=12,
+                    color=colors,
+                    colorscale='Turbo',
+                    line=dict(color='white', width=2),
+                    showscale=False
+                ),
+                text=hover_texts,
+                hovertemplate='<b>%{text}</b><br>X: %{x:.2f}<br>Y: %{y:.2f}<br>Z: %{z:.2f}<extra></extra>'
+            ))
+            
+            frames.append(go.Frame(data=frame_data, name=str(time_bin)))
+        
+        fig.frames = frames
+        
+        # Animation-Einstellungen
+        fig.update_layout(
+            updatemenus=[{
+                'type': 'buttons',
+                'showactive': True,
+                'buttons': [
+                    {'label': '▶ Play', 'method': 'animate', 
+                     'args': [None, {'frame': {'duration': 100, 'redraw': True},
+                                    'fromcurrent': True, 'mode': 'immediate', 
+                                    'transition': {'duration': 0}}]},
+                    {'label': '⏸ Pause', 'method': 'animate',
+                     'args': [[None], {'frame': {'duration': 0, 'redraw': False}, 
+                                      'mode': 'immediate'}]}
+                ],
+                'x': 0.1, 'y': 1.15
+            }],
+            sliders=[{
+                'steps': [{'args': [[f.name], {'frame': {'duration': 0, 'redraw': True}, 
+                                              'mode': 'immediate', 'transition': {'duration': 0}}],
+                          'label': f'Zeit: {f.name}', 'method': 'animate'} for f in frames],
+                'active': 0,
+                'y': -0.1,
+                'len': 0.9,
+                'x': 0.1
+            }]
+        )
+        
+        title = f'{method.upper()} - Animation: Punkt läuft über Trajektorie'
     
     fig.update_layout(
         title=title,
