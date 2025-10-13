@@ -16,16 +16,23 @@ app = dash.Dash(__name__)
 
 # Verfügbare CSV-Dateien finden
 data_dir = Path(__file__).parent.parent.parent / "data"
-csv_files = list(data_dir.glob("embeddings_*.csv"))
+manifold_dir = Path(__file__).parent.parent.parent / "manifold_embeddings"
 
-# Falls keine Dateien vorhanden, Beispiel laden
-if not csv_files:
+# Suche in beiden Verzeichnissen
+csv_files = list(data_dir.glob("embeddings_*.csv"))
+manifold_files = list(manifold_dir.glob("embeddings_*.csv")) if manifold_dir.exists() else []
+
+all_csv_files = csv_files + manifold_files
+
+# Falls keine Dateien vorhanden
+if not all_csv_files:
     print("⚠️  Keine Embedding-Dateien gefunden!")
-    print("   Bitte zuerst compute_and_save_embeddings.py ausführen")
-    # Fallback: Leere App
+    print("   Bitte zuerst compute_and_save_embeddings.py oder process_activity_logs.py ausführen")
     available_files = []
 else:
-    available_files = [f.name for f in csv_files]
+    # Erstelle Dict: Dateiname -> vollständiger Pfad
+    file_dict = {f.name: f for f in all_csv_files}
+    available_files = list(file_dict.keys())
 
 print(f"Gefundene Embedding-Dateien: {available_files}")
 
@@ -50,6 +57,32 @@ app.layout = html.Div([
                 id='label-dropdown',
                 options=[{'label': 'Alle', 'value': 'all'}] + 
                         [{'label': str(i), 'value': i} for i in range(10)],
+                value='all',
+                style={'width': '100%'}
+            ),
+        ], style={'width': '48%', 'display': 'inline-block'}),
+    ], style={'marginBottom': 20}),
+    
+    html.Div([
+        html.Div([
+            html.Label("Layer:", style={'fontWeight': 'bold'}),
+            dcc.Dropdown(
+                id='layer-dropdown',
+                options=[
+                    {'label': 'Alle', 'value': 'all'},
+                    {'label': 'Hidden', 'value': 'hidden'},
+                    {'label': 'Output', 'value': 'output'}
+                ],
+                value='all',
+                style={'width': '100%'}
+            ),
+        ], style={'width': '48%', 'display': 'inline-block', 'paddingRight': '2%'}),
+        
+        html.Div([
+            html.Label("Epoche:", style={'fontWeight': 'bold'}),
+            dcc.Dropdown(
+                id='epoch-dropdown',
+                options=[{'label': 'Alle', 'value': 'all'}],
                 value='all',
                 style={'width': '100%'}
             ),
@@ -96,27 +129,75 @@ app.layout = html.Div([
 ])
 
 @callback(
+    Output('epoch-dropdown', 'options'),
+    Input('file-dropdown', 'value')
+)
+def update_epoch_options(filename):
+    """Aktualisiert die Epoche-Optionen basierend auf der ausgewählten Datei."""
+    if not filename:
+        return [{'label': 'Alle', 'value': 'all'}]
+    
+    try:
+        filepath = file_dict.get(filename)
+        if filepath is None:
+            return [{'label': 'Alle', 'value': 'all'}]
+        
+        df = pd.read_csv(filepath)
+        
+        # Prüfe ob 'epoch' Spalte existiert
+        if 'epoch' in df.columns:
+            epochs = sorted(df['epoch'].unique())
+            options = [{'label': 'Alle', 'value': 'all'}] + \
+                     [{'label': f'Epoche {e}', 'value': e} for e in epochs]
+        else:
+            options = [{'label': 'Alle', 'value': 'all'}]
+        
+        return options
+    except:
+        return [{'label': 'Alle', 'value': 'all'}]
+
+@callback(
     [Output('3d-plot', 'figure'),
      Output('stats-output', 'children')],
     [Input('file-dropdown', 'value'),
      Input('label-dropdown', 'value'),
+     Input('layer-dropdown', 'value'),
+     Input('epoch-dropdown', 'value'),
      Input('n-samples-slider', 'value'),
      Input('viz-type', 'value')]
 )
-def update_graph(filename, label, n_samples, viz_type):
+def update_graph(filename, label, layer, epoch, n_samples, viz_type):
     if not filename:
         return go.Figure(), "Keine Daten verfügbar"
     
-    # Daten laden
-    filepath = data_dir / filename
+    # Daten laden (aus file_dict, das beide Verzeichnisse enthält)
+    filepath = file_dict.get(filename)
+    if filepath is None:
+        return go.Figure(), f"Datei nicht gefunden: {filename}"
+    
     df = pd.read_csv(filepath)
     
     # Filter nach Label
     if label != 'all':
         df = df[df['label'] == label]
     
+    # Filter nach Layer (falls Spalte vorhanden)
+    if layer != 'all' and 'layer' in df.columns:
+        df = df[df['layer'] == layer]
+    
+    # Filter nach Epoche (falls Spalte vorhanden)
+    if epoch != 'all' and 'epoch' in df.columns:
+        df = df[df['epoch'] == epoch]
+    
     if df.empty:
-        return go.Figure(), f"Keine Daten für Label {label}"
+        filter_info = []
+        if label != 'all':
+            filter_info.append(f"Label={label}")
+        if layer != 'all':
+            filter_info.append(f"Layer={layer}")
+        if epoch != 'all':
+            filter_info.append(f"Epoche={epoch}")
+        return go.Figure(), f"Keine Daten für Filter: {', '.join(filter_info)}"
     
     # Nur erste n_samples nehmen
     sample_ids = df['sample_id'].unique()[:n_samples]
@@ -332,9 +413,25 @@ def update_graph(filename, label, n_samples, viz_type):
     )
     
     # Statistiken
-    stats = html.Div([
+    stats_items = [
         html.P(f"📁 Datei: {filename}"),
         html.P(f"🔬 Methode: {method.upper()}"),
+    ]
+    
+    # Füge Layer hinzu falls vorhanden
+    if 'layer' in df.columns:
+        layers = sorted(df['layer'].unique())
+        stats_items.append(html.P(f"🧠 Layer: {', '.join(layers)}"))
+    
+    # Füge Epoche hinzu falls vorhanden
+    if 'epoch' in df.columns:
+        epochs = sorted(df['epoch'].unique())
+        if len(epochs) == 1:
+            stats_items.append(html.P(f"📅 Epoche: {epochs[0]}"))
+        else:
+            stats_items.append(html.P(f"📅 Epochen: {epochs}"))
+    
+    stats_items.extend([
         html.P(f"📊 Anzahl Samples: {len(sample_ids)}"),
         html.P(f"🏷️  Labels: {sorted(df['label'].unique())}"),
         html.P(f"📈 Datenpunkte gesamt: {len(df):,}"),
@@ -344,6 +441,8 @@ def update_graph(filename, label, n_samples, viz_type):
         html.P(f"Y-Bereich: [{df['y'].min():.2f}, {df['y'].max():.2f}]"),
         html.P(f"Z-Bereich: [{df['z'].min():.2f}, {df['z'].max():.2f}]"),
     ])
+    
+    stats = html.Div(stats_items)
     
     return fig, stats
 
