@@ -63,7 +63,7 @@ test_dataloader = load_filtered_shd_dataloader(
 # ============================================================================
 net = Net(
     num_inputs=70,      # Nach Downsample1D(0.1): 700 -> 70
-    num_hidden=1000, 
+    num_hidden=35,      # Reduziert für mehr Epochen
     num_outputs=10, 
     num_steps=80,       # 80 Zeitbins
     beta=0.9
@@ -83,7 +83,7 @@ raster_cb = RasterPlotCallback(
     dataloader=test_dataloader, 
     device=device, 
     out_dir="./plots", 
-    max_neurons_hidden=1000
+    max_neurons_hidden=35
 )
 
 # 2. Gebinnte Aktivitäten für Manifold-Analysen
@@ -99,7 +99,7 @@ activity_cb = BinnedActivityLoggerCallback(
 # TRAINING LOOP
 # ============================================================================
 if __name__ == "__main__":
-    num_epochs = 6
+    num_epochs = 12
     
     for epoch in range(1, num_epochs + 1):
         print(f"\n{'='*80}")
