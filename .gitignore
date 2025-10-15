@@ -1,4 +1,4 @@
-
+tutorials/
 data/cache
 data/SHD
 data/data
@@ -14,6 +14,7 @@ __pycache__/
 *.so
 cache
 venv
+*.bin
 # Distribution / packaging
 .Python
 venvtorch
