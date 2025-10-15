@@ -63,7 +63,7 @@ test_dataloader = load_filtered_shd_dataloader(
 # ============================================================================
 net = Net(
     num_inputs=70,      # Nach Downsample1D(0.1): 700 -> 70
-    num_hidden=35,      # Reduziert für mehr Epochen
+    num_hidden=100,      # Reduziert für mehr Epochen
     num_outputs=10, 
     num_steps=80,       # 80 Zeitbins
     beta=0.9
@@ -91,7 +91,7 @@ activity_cb = BinnedActivityLoggerCallback(
     dataloader=test_dataloader,
     device=device,
     out_dir="./activity_logs",
-    max_samples_per_epoch=20,  # Speichere 20 Samples pro Epoche
+    max_samples_per_epoch=200,  # Erhöht: 200 Samples pro Epoche
     layer_names={'spk1': 'hidden', 'spk2': 'output'}
 )
 
@@ -99,7 +99,7 @@ activity_cb = BinnedActivityLoggerCallback(
 # TRAINING LOOP
 # ============================================================================
 if __name__ == "__main__":
-    num_epochs = 12
+    num_epochs = 30
     
     for epoch in range(1, num_epochs + 1):
         print(f"\n{'='*80}")

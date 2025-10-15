@@ -77,3 +77,76 @@ def load_shd_raw_subset(train=False, label_range=range(0, 9)):
     
     subset = Subset(dataset_full, filtered_indices)
     return subset
+
+def load_filtered_nmnist_dataloader(
+    label_range=range(0, 10),
+    transform=None,
+    train=True,
+    batch_size=32,
+    shuffle=True,
+    drop_last=True,
+    num_workers=0,
+):
+    """
+    Lädt einen gefilterten und transformierten NMNIST-Datensatz als DataLoader.
+
+    Args:
+        label_range (iterable): Liste oder Range der gewünschten Labels (default: 0–9)
+        transform (callable): Event → Tensor Transform (default: ToFrame)
+        train (bool): Trainings- oder Testset
+        batch_size (int): Batchgröße für DataLoader
+        shuffle (bool): Zufällige Batchmischung
+        drop_last (bool): Letzten Batch verwerfen, wenn zu klein
+        num_workers (int): DataLoader Worker
+
+    Returns:
+        torch.utils.data.DataLoader: Dataloader für das vorbereitete NMNIST-Dataset
+    """
+    dataset_full = tonic.datasets.NMNIST(save_to="./data", train=train, transform=None)
+
+    label_range = set(label_range)
+    filtered_indices = [
+        i for i in range(len(dataset_full)) if dataset_full[i][1] in label_range
+    ]
+
+    if transform is None:
+        transform = ToFrame(
+            sensor_size=tonic.datasets.NMNIST.sensor_size,  # = (34, 34, 2)
+            n_time_bins=300
+        )
+    subset = Subset(dataset_full, filtered_indices)
+    transformed_dataset = TransformedDataset(subset, transform)
+
+    cache_path = f'./cache/nmist/{"train" if train else "test"}'
+    cached_dataset = DiskCachedDataset(transformed_dataset, cache_path=cache_path)
+    dataloader = DataLoader(
+        cached_dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        collate_fn=PadTensors(),
+        num_workers=num_workers,
+    )
+
+    return dataloader
+
+def load_nmnist_raw_subset(train=False, label_range=range(0, 9)):
+    """
+    Lädt einen gefilterten NMNIST-Datensatz als rohe Events (ohne Transformation).
+
+    Args:
+        train (bool): Trainings- oder Testset
+        label_range (iterable): Liste oder Range der gewünschten Labels
+
+    Returns:
+        torch.utils.data.Subset: Gefilterter Subset des NMNIST-Datensatzes
+    """
+    dataset_full = tonic.datasets.NMNIST(save_to="./data", train=train, transform=None)
+
+    label_range = set(label_range)
+    filtered_indices = [
+        i for i in range(len(dataset_full)) if dataset_full[i][1] in label_range
+    ]
+    
+    subset = Subset(dataset_full, filtered_indices)
+    return subset

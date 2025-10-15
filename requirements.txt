@@ -19,6 +19,7 @@ plotly
 dash 
 tonic
 ipywidgets
+ipykernel
 umap-learn
 scikit-learn
 tqdm

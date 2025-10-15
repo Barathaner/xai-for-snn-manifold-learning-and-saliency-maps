@@ -11,6 +11,7 @@ echo "
 Schritt 1: Verarbeite Activity-Logs..."
 echo "--------------------------------------------------------------------------------"
 
+# Hidden Layer
 python3 process_activity_logs.py \
     --activity-dir ./activity_logs \
     --output-dir ./manifold_embeddings \
@@ -19,16 +20,32 @@ python3 process_activity_logs.py \
     --n-components 3 \
     --layer hidden
 
-echo "
-Schritt 2: Verarbeite auch mit PCA..."
-echo "--------------------------------------------------------------------------------"
-
 python3 process_activity_logs.py \
     --activity-dir ./activity_logs \
     --output-dir ./manifold_embeddings \
     --method pca \
     --n-components 3 \
     --layer hidden
+
+echo "
+Schritt 2: Verarbeite auch Output Layer..."
+echo "--------------------------------------------------------------------------------"
+
+# Output Layer
+python3 process_activity_logs.py \
+    --activity-dir ./activity_logs \
+    --output-dir ./manifold_embeddings \
+    --method isomap \
+    --n-neighbors 5 \
+    --n-components 3 \
+    --layer output
+
+python3 process_activity_logs.py \
+    --activity-dir ./activity_logs \
+    --output-dir ./manifold_embeddings \
+    --method pca \
+    --n-components 3 \
+    --layer output
 
 echo "
 ================================================================================

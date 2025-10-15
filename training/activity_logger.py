@@ -156,40 +156,62 @@ class BinnedActivityLoggerCallback:
         """Speichert gebinnte Aktivitäten am Ende der Epoche."""
         net.eval()
         
-        with torch.no_grad():
-            x, labels = next(iter(self.dataloader))
-            
-            if x.ndim == 4:
-                x = x.squeeze(2)
-            
-            _ = net(x.to(self.device))
+        all_data = {layer_name: [] for layer_name in self.layer_names.values()}
+        all_labels = []
+        samples_processed = 0
         
-        # Speichere für jeden Layer
-        for recording_name, layer_name in self.layer_names.items():
-            spk = net.recordings.get(recording_name)
-            
-            if spk is None:
-                continue
-            
-            self._save_binned_csv(
-                spk=spk.cpu().numpy(),
-                labels=labels.numpy(),
-                epoch=epoch,
-                layer_name=layer_name
-            )
+        with torch.no_grad():
+            # Verarbeite mehrere Batches bis max_samples_per_epoch erreicht
+            for batch_idx, (x, labels) in enumerate(self.dataloader):
+                if samples_processed >= self.max_samples_per_epoch:
+                    break
+                    
+                if x.ndim == 4:
+                    x = x.squeeze(2)
+                
+                _ = net(x.to(self.device))
+                
+                # Speichere für jeden Layer
+                for recording_name, layer_name in self.layer_names.items():
+                    spk = net.recordings.get(recording_name)
+                    
+                    if spk is None:
+                        continue
+                    
+                    # Sammle Daten für diesen Batch
+                    batch_data = self._extract_batch_data(
+                        spk=spk.cpu().numpy(),
+                        labels=labels.numpy(),
+                        epoch=epoch,
+                        layer_name=layer_name,
+                        max_samples=self.max_samples_per_epoch - samples_processed
+                    )
+                    all_data[layer_name].extend(batch_data)
+                
+                all_labels.extend(labels.numpy().tolist())
+                samples_processed += len(labels)
+        
+        # Speichere alle gesammelten Daten
+        for layer_name, data in all_data.items():
+            if data:  # Nur speichern wenn Daten vorhanden
+                df = pd.DataFrame(data)
+                filename = self.out_dir / f"epoch_{epoch:03d}_{layer_name}_binned.csv"
+                df.to_csv(filename, index=False)
+                print(f"✅ Gebinnte Aktivitäten: {filename} ({len(df)} Einträge, {samples_processed} Samples)")
     
-    def _save_binned_csv(self, spk, labels, epoch, layer_name):
+    def _extract_batch_data(self, spk, labels, epoch, layer_name, max_samples):
         """
-        Speichert gebinnte Aktivität (wie vec im Notebook).
+        Extrahiert Batch-Daten für gebinnte Aktivität.
         
         Args:
             spk: Spike-Tensor (batch, time, neurons)
             labels: Labels (batch,)
             epoch: Epoche
             layer_name: Layer-Name
+            max_samples: Max. Anzahl Samples für diesen Batch
         """
         batch_size, n_time_bins, n_neurons = spk.shape
-        n_samples = min(batch_size, self.max_samples_per_epoch)
+        n_samples = min(batch_size, max_samples)
         
         data = []
         
@@ -204,20 +226,16 @@ class BinnedActivityLoggerCallback:
                 
                 # Long Format: ein Eintrag pro Neuron
                 for n_id, value in enumerate(neuron_values):
-                    if value > 0:  # Nur aktive Neuronen
-                        data.append({
-                            'sample_id': sample_idx,
-                            'epoch': epoch,
-                            'layer': layer_name,
-                            'time_bin': t,
-                            'neuron_id': n_id,
-                            'value': float(value),
-                            'label': label
-                        })
+                    # Speichere ALLE Werte (auch 0) für vollständige Daten
+                    data.append({
+                        'sample_id': sample_idx,
+                        'epoch': epoch,
+                        'layer': layer_name,
+                        'time_bin': t,
+                        'neuron_id': n_id,
+                        'value': float(value),
+                        'label': label
+                    })
         
-        df = pd.DataFrame(data)
-        filename = self.out_dir / f"epoch_{epoch:03d}_{layer_name}_binned.csv"
-        df.to_csv(filename, index=False)
-        
-        print(f"✅ Gebinnte Aktivitäten: {filename} ({len(df)} Einträge)")
+        return data
 
