@@ -106,6 +106,7 @@ app.layout = html.Div([
                 id='viz-type',
                 options=[
                     {'label': ' Trajektorien (Linien)', 'value': 'lines'},
+                    {'label': ' Trajektorien (nach Label)', 'value': 'lines_by_label'},
                     {'label': ' Scatter (Punkte)', 'value': 'scatter'},
                     {'label': ' Animation über Zeit', 'value': 'animation'},
                     {'label': ' Animation über Epochen', 'value': 'epoch_animation'}
@@ -114,6 +115,18 @@ app.layout = html.Div([
                 inline=True
             ),
         ], style={'width': '48%', 'display': 'inline-block'}),
+    ], style={'marginBottom': 20}),
+    
+    html.Div([
+        html.Div([
+            html.Label("Zeitbin-Bereich:", style={'fontWeight': 'bold'}),
+            dcc.RangeSlider(
+                id='timebin-range-slider',
+                min=0, max=100, value=[0, 100], step=1,
+                marks={i: str(i) for i in range(0, 101, 10)},
+                tooltip={"placement": "bottom", "always_visible": True}
+            ),
+        ], style={'width': '100%', 'display': 'inline-block'}),
     ], style={'marginBottom': 30}),
     
     # Info-Box für Epochen-Animation
@@ -174,6 +187,50 @@ def update_epoch_slider(filename):
         return {0: '0'}, 0, 0
 
 @callback(
+    [Output('timebin-range-slider', 'min'),
+     Output('timebin-range-slider', 'max'),
+     Output('timebin-range-slider', 'value'),
+     Output('timebin-range-slider', 'marks')],
+    Input('file-dropdown', 'value')
+)
+def update_timebin_slider(filename):
+    """Aktualisiert die Zeitbin-Slider-Optionen basierend auf der ausgewählten Datei."""
+    if not filename:
+        return 0, 100, [0, 100], {i: str(i) for i in range(0, 101, 10)}
+    
+    try:
+        filepath = file_dict.get(filename)
+        if filepath is None:
+            return 0, 100, [0, 100], {i: str(i) for i in range(0, 101, 10)}
+        
+        df = pd.read_csv(filepath)
+        
+        # Prüfe ob 'time_bin' Spalte existiert
+        if 'time_bin' in df.columns:
+            time_bins = sorted(df['time_bin'].unique())
+            if time_bins:
+                min_timebin = int(min(time_bins))
+                max_timebin = int(max(time_bins))
+                
+                # Erstelle Marks alle 10 Zeitbins oder bei wichtigen Zeitbins
+                marks = {}
+                step = max(1, (max_timebin - min_timebin) // 10)
+                for i in range(min_timebin, max_timebin + 1, step):
+                    marks[i] = str(i)
+                # Füge die tatsächlichen Zeitbins hinzu
+                for timebin in time_bins:
+                    marks[int(timebin)] = str(int(timebin))
+                
+                return min_timebin, max_timebin, [min_timebin, max_timebin], marks
+            else:
+                return 0, 100, [0, 100], {i: str(i) for i in range(0, 101, 10)}
+        else:
+            return 0, 100, [0, 100], {i: str(i) for i in range(0, 101, 10)}
+        
+    except:
+        return 0, 100, [0, 100], {i: str(i) for i in range(0, 101, 10)}
+
+@callback(
     Output('epoch-label', 'children'),
     Input('epoch-slider', 'value')
 )
@@ -209,9 +266,10 @@ def toggle_filters(viz_type):
      Input('layer-dropdown', 'value'),
      Input('epoch-slider', 'value'),
      Input('n-samples-slider', 'value'),
-     Input('viz-type', 'value')]
+     Input('viz-type', 'value'),
+     Input('timebin-range-slider', 'value')]
 )
-def update_graph(filename, label, layer, epoch, n_samples, viz_type):
+def update_graph(filename, label, layer, epoch, n_samples, viz_type, timebin_range):
     if not filename:
         return go.Figure(), "Keine Daten verfügbar"
     
@@ -234,6 +292,11 @@ def update_graph(filename, label, layer, epoch, n_samples, viz_type):
     if epoch != 0 and 'epoch' in df.columns and viz_type != 'epoch_animation':
         df = df[df['epoch'] == epoch]
     
+    # Filter nach Zeitbin-Bereich
+    if timebin_range and len(timebin_range) == 2:
+        min_timebin, max_timebin = timebin_range
+        df = df[(df['time_bin'] >= min_timebin) & (df['time_bin'] <= max_timebin)]
+    
     if df.empty:
         filter_info = []
         if label != 'all':
@@ -242,6 +305,8 @@ def update_graph(filename, label, layer, epoch, n_samples, viz_type):
             filter_info.append(f"Layer={layer}")
         if epoch != 0 and viz_type != 'epoch_animation':
             filter_info.append(f"Epoche={epoch}")
+        if timebin_range and len(timebin_range) == 2:
+            filter_info.append(f"Zeitbins={timebin_range[0]}-{timebin_range[1]}")
         return go.Figure(), f"Keine Daten für Filter: {', '.join(filter_info)}"
     
     # Nur erste n_samples nehmen
@@ -285,6 +350,56 @@ def update_graph(filename, label, layer, epoch, n_samples, viz_type):
             ))
         
         title = f'{method.upper()} - Trajektorien über Zeit (Farbverlauf)'
+    
+    elif viz_type == 'lines_by_label':
+        # Trajektorien mit Label-Farbcodierung
+        fig = go.Figure()
+        
+        # Farben für verschiedene Labels
+        label_colors = px.colors.qualitative.Set1
+        label_symbols = ['circle', 'square', 'diamond', 'cross', 'x', 
+                        'circle-open', 'square-open', 'diamond-open']
+        
+        # Gruppiere Samples nach Labels
+        labels_in_data = sorted(df['label'].unique())
+        
+        for label_idx, label_val in enumerate(labels_in_data):
+            label_df = df[df['label'] == label_val]
+            label_samples = [sid for sid in sample_ids if sid in label_df['sample_id'].unique()]
+            
+            if not label_samples:
+                continue
+                
+            color = label_colors[label_idx % len(label_colors)]
+            symbol = label_symbols[label_idx % len(label_symbols)]
+            
+            for sample_id in label_samples:
+                sample_df = label_df[label_df['sample_id'] == sample_id].sort_values('time_bin')
+                
+                # Linie mit Label-Farbe
+                fig.add_trace(go.Scatter3d(
+                    x=sample_df['x'],
+                    y=sample_df['y'],
+                    z=sample_df['z'],
+                    mode='lines+markers',
+                    name=f'Label {label_val} - Sample {sample_id}',
+                    legendgroup=f'Label {label_val}',
+                    showlegend=True if sample_id == label_samples[0] else False,
+                    line=dict(
+                        color=color,
+                        width=3
+                    ),
+                    marker=dict(
+                        size=4,
+                        color=color,
+                        symbol=symbol,
+                        line=dict(color='white', width=0.5)
+                    ),
+                    hovertemplate=f'<b>Label {label_val} - Sample {sample_id}</b><br>Zeit: %{{text}}<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<br>Z: %{{z:.2f}}<extra></extra>',
+                    text=sample_df['time_bin'].tolist()
+                ))
+        
+        title = f'{method.upper()} - Trajektorien nach Labels (farbcodiert)'
     
     elif viz_type == 'scatter':
         # Scatter Plot mit Farbcodierung
@@ -646,6 +761,17 @@ def update_graph(filename, label, layer, epoch, n_samples, viz_type):
         html.P(f"🏷️  Labels: {sorted(df['label'].unique())}"),
         html.P(f"📈 Datenpunkte gesamt: {len(df):,}"),
         html.P(f"⏱️  Zeitbins pro Sample: {df.groupby('sample_id')['time_bin'].count().iloc[0]}"),
+    ])
+    
+    # Zeitbin-Information hinzufügen
+    if timebin_range and len(timebin_range) == 2:
+        min_timebin, max_timebin = timebin_range
+        stats_items.append(html.P(f"🕒 Zeitbin-Bereich: {min_timebin} - {max_timebin}"))
+    else:
+        time_bins_in_data = sorted(df['time_bin'].unique())
+        stats_items.append(html.P(f"🕒 Zeitbins in Daten: {time_bins_in_data[0]} - {time_bins_in_data[-1]}"))
+    
+    stats_items.extend([
         html.Hr(),
         html.P(f"X-Bereich: [{df['x'].min():.2f}, {df['x'].max():.2f}]"),
         html.P(f"Y-Bereich: [{df['y'].min():.2f}, {df['y'].max():.2f}]"),
