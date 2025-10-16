@@ -42,6 +42,10 @@ def compute_embeddings(dataset_split='train', method='isomap', n_neighbors=5, n_
     """
     Berechnet Embeddings für alle Samples und speichert im Long Format.
     
+    WICHTIG: Manifold-Learning-Algorithmen (t-SNE, Isomap, UMAP) müssen auf ALLEN Daten
+    gleichzeitig angewendet werden, nicht auf jedem Sample einzeln. Sie sind holistisch
+    und benötigen die gesamte Datenverteilung für korrekte Ergebnisse.
+    
     Args:
         dataset_split: 'train' oder 'test'
         method: 'isomap', 'tsne', 'umap', oder 'pca'
@@ -96,44 +100,66 @@ def compute_embeddings(dataset_split='train', method='isomap', n_neighbors=5, n_
         'n_time_bins': n_time_bins
     }
     
-    # Daten sammeln
-    all_data = []
+    # KORRIGIERT: Alle Daten sammeln und zusammen transformieren
+    all_vectors = []
+    all_metadata = []
     
     # Limitiere für Testing
     n_samples = min(max_samples, len(dataset)) if max_samples else len(dataset)
     
-    print(f"Berechne {method.upper()} für {n_samples} samples...")
+    print(f"Sammle Daten für {n_samples} samples...")
     
-    for i in tqdm(range(n_samples), desc="Processing samples"):
+    # 1. ALLE Daten sammeln
+    for i in tqdm(range(n_samples), desc="Sammle Daten"):
         events, label = dataset[i]
         
         # Transform anwenden
         frames = trans(events)
         vec = frames[:, 0, :]  # Shape: (n_time_bins, n_neurons)
         
-        # Embedding berechnen
-        try:
-            emb = model.fit_transform(vec)  # Shape: (n_time_bins, n_components)
-        except Exception as e:
-            print(f"\nWarnung: Sample {i} übersprungen. Fehler: {e}")
-            continue
-        
-        # In Long Format konvertieren
-        for t in range(emb.shape[0]):
-            row = {
+        # Für jeden Zeitpunkt einen separaten Datenpunkt
+        for t in range(vec.shape[0]):
+            all_vectors.append(vec[t, :])  # Ein Zeitpunkt = ein Datenpunkt
+            all_metadata.append({
                 'sample_id': i,
-                'label': int(label),
-                'method': method,
                 'time_bin': t,
-                'x': float(emb[t, 0]),
-                'y': float(emb[t, 1]) if n_components > 1 else None,
-                'z': float(emb[t, 2]) if n_components > 2 else None,
-                'n_neighbors': n_neighbors if method in ['isomap', 'umap'] else None,
-                'n_components': n_components,
-                'n_time_bins': n_time_bins,
-                'dataset_split': dataset_split
-            }
-            all_data.append(row)
+                'label': int(label)
+            })
+    
+    print(f"Gesammelt: {len(all_vectors)} Datenpunkte aus {n_samples} Samples")
+    
+    # 2. ALLE Datenpunkte zusammen transformieren
+    print(f"Berechne {method.upper()} für alle {len(all_vectors)} Datenpunkte zusammen...")
+    
+    # Konvertiere zu numpy array
+    X = np.array(all_vectors)  # Shape: (n_data_points, n_neurons)
+    print(f"Input Shape: {X.shape}")
+    
+    # KORRIGIERT: Einmalige Transformation aller Daten
+    try:
+        X_embedded = model.fit_transform(X)  # Shape: (n_data_points, n_components)
+        print(f"Output Shape: {X_embedded.shape}")
+    except Exception as e:
+        print(f"\nFehler bei {method.upper()}: {e}")
+        return None
+    
+    # 3. Ergebnisse in Long Format konvertieren
+    all_data = []
+    for i, (point, meta) in enumerate(zip(X_embedded, all_metadata)):
+        row = {
+            'sample_id': meta['sample_id'],
+            'label': meta['label'],
+            'method': method,
+            'time_bin': meta['time_bin'],
+            'x': float(point[0]),
+            'y': float(point[1]) if n_components > 1 else None,
+            'z': float(point[2]) if n_components > 2 else None,
+            'n_neighbors': n_neighbors if method in ['isomap', 'umap'] else None,
+            'n_components': n_components,
+            'n_time_bins': n_time_bins,
+            'dataset_split': dataset_split
+        }
+        all_data.append(row)
     
     # DataFrame erstellen
     df = pd.DataFrame(all_data)
