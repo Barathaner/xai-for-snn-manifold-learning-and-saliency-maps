@@ -12,6 +12,7 @@ from torch.utils.data import Subset, Dataset
 from tqdm import tqdm
 import argparse
 from pathlib import Path
+from datetime import datetime
 
 
 class TransformedDataset(Dataset):
@@ -166,7 +167,8 @@ def compute_embeddings(dataset_split='train', method='isomap', n_neighbors=5, n_
     
     # Output-Datei bestimmen
     if output_file is None:
-        output_file = f"data/embeddings_{method}_{dataset_split}_n{n_neighbors}_c{n_components}.csv"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = f"data/embeddings_{method}_{dataset_split}_n{n_neighbors}_c{n_components}_{timestamp}.csv"
     
     # Verzeichnis erstellen falls nötig
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)

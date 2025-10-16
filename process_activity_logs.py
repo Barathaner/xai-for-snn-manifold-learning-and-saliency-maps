@@ -14,6 +14,7 @@ from sklearn.decomposition import PCA
 from pathlib import Path
 from tqdm import tqdm
 import argparse
+from datetime import datetime
 
 
 def reconstruct_vec_from_csv(df, n_time_bins=80, n_neurons=70):
@@ -83,10 +84,13 @@ def process_activity_logs(csv_file, method='isomap', n_neighbors=5, n_components
     else:
         raise ValueError(f"Unbekannte Methode: {method}")
     
-    # Verarbeite alle Samples
-    all_embeddings = []
+    # KORRIGIERT: Alle Daten sammeln und zusammen transformieren
+    all_vectors = []
+    all_metadata = []
     
-    for sample_id in tqdm(sample_ids, desc=f"  {method.upper()}"):
+    print(f"   Sammle Daten für {len(sample_ids)} Samples...")
+    
+    for sample_id in tqdm(sample_ids, desc="  Sammle Daten"):
         # Filter auf dieses Sample
         sample_df = df[df['sample_id'] == sample_id]
         label = sample_df['label'].iloc[0]
@@ -94,28 +98,48 @@ def process_activity_logs(csv_file, method='isomap', n_neighbors=5, n_components
         # Rekonstruiere vec
         vec = reconstruct_vec_from_csv(sample_df, n_time_bins, n_neurons)
         
-        # Wende Manifold-Learning an
-        try:
-            emb = model.fit_transform(vec)  # (n_time_bins, n_components)
-        except Exception as e:
-            print(f"\n⚠️  Sample {sample_id} übersprungen: {e}")
-            continue
-        
-        # Konvertiere zu Long Format
-        for t in range(emb.shape[0]):
-            all_embeddings.append({
+        # Für jeden Zeitpunkt einen separaten Datenpunkt
+        for t in range(vec.shape[0]):
+            all_vectors.append(vec[t, :])  # Ein Zeitpunkt = ein Datenpunkt
+            all_metadata.append({
                 'sample_id': sample_id,
-                'epoch': epoch,
-                'layer': layer,
-                'label': int(label),
-                'method': method,
                 'time_bin': t,
-                'x': float(emb[t, 0]),
-                'y': float(emb[t, 1]) if n_components > 1 else None,
-                'z': float(emb[t, 2]) if n_components > 2 else None,
-                'n_neighbors': n_neighbors if method in ['isomap', 'umap'] else None,
-                'n_components': n_components,
+                'label': int(label)
             })
+    
+    print(f"   Gesammelt: {len(all_vectors)} Datenpunkte aus {len(sample_ids)} Samples")
+    
+    # ALLE Datenpunkte zusammen transformieren
+    print(f"   Berechne {method.upper()} für alle {len(all_vectors)} Datenpunkte zusammen...")
+    
+    # Konvertiere zu numpy array
+    X = np.array(all_vectors)  # Shape: (n_data_points, n_neurons)
+    print(f"   Input Shape: {X.shape}")
+    
+    # KORRIGIERT: Einmalige Transformation aller Daten
+    try:
+        X_embedded = model.fit_transform(X)  # Shape: (n_data_points, n_components)
+        print(f"   Output Shape: {X_embedded.shape}")
+    except Exception as e:
+        print(f"\n❌ Fehler bei {method.upper()}: {e}")
+        return None
+    
+    # Ergebnisse in Long Format konvertieren
+    all_embeddings = []
+    for i, (point, meta) in enumerate(zip(X_embedded, all_metadata)):
+        all_embeddings.append({
+            'sample_id': meta['sample_id'],
+            'epoch': epoch,
+            'layer': layer,
+            'label': meta['label'],
+            'method': method,
+            'time_bin': meta['time_bin'],
+            'x': float(point[0]),
+            'y': float(point[1]) if n_components > 1 else None,
+            'z': float(point[2]) if n_components > 2 else None,
+            'n_neighbors': n_neighbors if method in ['isomap', 'umap'] else None,
+            'n_components': n_components,
+        })
     
     # DataFrame erstellen
     embeddings_df = pd.DataFrame(all_embeddings)
@@ -175,8 +199,9 @@ def process_all_activity_logs(activity_dir='./activity_logs',
     # Kombiniere alle Embeddings
     final_df = pd.concat(all_embeddings, ignore_index=True)
     
-    # Speichere als CSV
-    output_file = output_path / f"embeddings_{method}_n{n_neighbors}_c{n_components}.csv"
+    # Speichere als CSV mit Zeitstempel
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = output_path / f"embeddings_{method}_n{n_neighbors}_c{n_components}_{timestamp}.csv"
     final_df.to_csv(output_file, index=False)
     
     print(f"\n{'='*80}")
