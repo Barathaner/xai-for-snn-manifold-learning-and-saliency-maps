@@ -38,6 +38,151 @@ class Downsample1D:
         return events
 
 
+def compute_embeddings_flattened(dataset_split='train', method='isomap', n_neighbors=5, n_components=3,
+                                n_time_bins=80, output_file=None, max_samples=None):
+    """
+    Berechnet Embeddings für geflattete Zeitbin-Neuron-Paare.
+    
+    Jedes Zeitbin-Neuron-Paar wird als separater Datenpunkt behandelt, was die
+    Klassentrennung deutlicher macht. Statt (time_bin, neuron) als separate
+    Dimensionen zu haben, werden sie zu einem flachen Vektor kombiniert.
+    
+    Args:
+        dataset_split: 'train' oder 'test'
+        method: 'isomap', 'tsne', 'umap', oder 'pca'
+        n_neighbors: Anzahl Nachbarn für Isomap/UMAP
+        n_components: Anzahl Dimensionen (2 oder 3)
+        n_time_bins: Anzahl Zeitbins
+        output_file: Pfad zur CSV-Datei
+        max_samples: Optional, limitiert Anzahl Samples für Testing
+    """
+    
+    print(f"Lade {dataset_split} Dataset...")
+    if dataset_split == 'train':
+        dataset = tonic.datasets.SHD(save_to="./data", train=True)
+    else:
+        dataset = tonic.datasets.SHD(save_to="./data", train=False)
+    
+    print(f"Original Dataset Größe: {len(dataset)} samples")
+    
+    # Filter auf Labels 0-9
+    label_range = set(range(0, 10))
+    filtered_indices = [
+        i for i in range(len(dataset)) if dataset[i][1] in label_range
+    ]
+    dataset = Subset(dataset, filtered_indices)
+    print(f"Nach Filterung: {len(dataset)} samples")
+    
+    # Transform Pipeline
+    trans = transforms.Compose([
+        Downsample1D(spatial_factor=0.1),   
+        tonic.transforms.ToFrame(sensor_size=(70, 1, 1), n_time_bins=n_time_bins),
+    ])
+    
+    # Modell erstellen
+    if method == 'isomap':
+        model = Isomap(n_neighbors=n_neighbors, n_components=n_components)
+    elif method == 'pca':
+        from sklearn.decomposition import PCA
+        model = PCA(n_components=n_components)
+    elif method == 'tsne':
+        from sklearn.manifold import TSNE
+        model = TSNE(n_components=n_components, perplexity=min(30, n_time_bins*70-1))
+    elif method == 'umap':
+        import umap
+        model = umap.UMAP(n_neighbors=n_neighbors, n_components=n_components)
+    else:
+        raise ValueError(f"Unbekannte Methode: {method}")
+    
+    # KORRIGIERT: Alle geflatteten Daten sammeln und zusammen transformieren
+    all_vectors = []
+    all_metadata = []
+    
+    # Limitiere für Testing
+    n_samples = min(max_samples, len(dataset)) if max_samples else len(dataset)
+    
+    print(f"Sammle GEFLATTETE Daten für {n_samples} samples...")
+    
+    # 1. ALLE Daten sammeln und flachen
+    for i in tqdm(range(n_samples), desc="Sammle geflattete Daten"):
+        events, label = dataset[i]
+        
+        # Transform anwenden
+        frames = trans(events)
+        vec = frames[:, 0, :]  # Shape: (n_time_bins, n_neurons)
+        
+        # GEFLATTET: Jedes Zeitbin-Neuron-Paar als separater Datenpunkt
+        flattened_vec = vec.flatten()  # Shape: (n_time_bins * n_neurons,)
+        
+        all_vectors.append(flattened_vec)
+        all_metadata.append({
+            'sample_id': i,
+            'label': int(label)
+        })
+    
+    print(f"Gesammelt: {len(all_vectors)} geflattete Vektoren aus {n_samples} Samples")
+    print(f"Vektor-Dimension: {len(all_vectors[0])} (Zeitbins × Neuronen = {n_time_bins} × 70)")
+    
+    # 2. ALLE geflatteten Vektoren zusammen transformieren
+    print(f"Berechne {method.upper()} für alle {len(all_vectors)} geflatteten Vektoren zusammen...")
+    
+    # Konvertiere zu numpy array
+    X = np.array(all_vectors)  # Shape: (n_samples, n_time_bins * n_neurons)
+    print(f"Input Shape: {X.shape}")
+    
+    # KORRIGIERT: Einmalige Transformation aller geflatteten Daten
+    try:
+        X_embedded = model.fit_transform(X)  # Shape: (n_samples, n_components)
+        print(f"Output Shape: {X_embedded.shape}")
+    except Exception as e:
+        print(f"\nFehler bei {method.upper()}: {e}")
+        return None
+    
+    # 3. Ergebnisse in Long Format konvertieren (jeder Sample = ein Punkt)
+    all_data = []
+    for i, (point, meta) in enumerate(zip(X_embedded, all_metadata)):
+        row = {
+            'sample_id': meta['sample_id'],
+            'label': meta['label'],
+            'method': f"{method}_flattened",
+            'time_bin': None,  # Keine Zeitbins mehr, da geflattet
+            'x': float(point[0]),
+            'y': float(point[1]) if n_components > 1 else None,
+            'z': float(point[2]) if n_components > 2 else None,
+            'n_neighbors': n_neighbors if method in ['isomap', 'umap'] else None,
+            'n_components': n_components,
+            'n_time_bins': n_time_bins,
+            'dataset_split': dataset_split,
+            'flattened': True  # Flag für geflattete Daten
+        }
+        all_data.append(row)
+    
+    # DataFrame erstellen
+    df = pd.DataFrame(all_data)
+    
+    # Output-Datei bestimmen
+    if output_file is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = f"data/embeddings_{method}_flattened_{dataset_split}_n{n_neighbors}_c{n_components}_{timestamp}.csv"
+    
+    # Verzeichnis erstellen falls nötig
+    Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+    
+    # Speichern
+    df.to_csv(output_file, index=False)
+    print(f"\n✅ Gespeichert: {output_file}")
+    print(f"   Shape: {df.shape}")
+    print(f"   Spalten: {list(df.columns)}")
+    print(f"\nErste Zeilen:")
+    print(df.head(10))
+    print(f"\nStatistiken:")
+    print(f"   Samples: {df['sample_id'].nunique()}")
+    print(f"   Labels: {sorted(df['label'].unique())}")
+    print(f"   Geflattete Vektoren: {len(df)}")
+    
+    return df
+
+
 def compute_embeddings(dataset_split='train', method='isomap', n_neighbors=5, n_components=3,
                       n_time_bins=80, output_file=None, max_samples=None):
     """
@@ -205,16 +350,29 @@ if __name__ == "__main__":
                        help='Output CSV Datei')
     parser.add_argument('--max-samples', type=int, default=None,
                        help='Maximale Anzahl Samples (für Testing)')
+    parser.add_argument('--flattened', action='store_true',
+                       help='Verwende geflattete Vektoren (ein Sample = ein Datenpunkt)')
     
     args = parser.parse_args()
     
-    df = compute_embeddings(
-        dataset_split=args.split,
-        method=args.method,
-        n_neighbors=args.n_neighbors,
-        n_components=args.n_components,
-        n_time_bins=args.n_time_bins,
-        output_file=args.output,
-        max_samples=args.max_samples
-    )
+    if args.flattened:
+        df = compute_embeddings_flattened(
+            dataset_split=args.split,
+            method=args.method,
+            n_neighbors=args.n_neighbors,
+            n_components=args.n_components,
+            n_time_bins=args.n_time_bins,
+            output_file=args.output,
+            max_samples=args.max_samples
+        )
+    else:
+        df = compute_embeddings(
+            dataset_split=args.split,
+            method=args.method,
+            n_neighbors=args.n_neighbors,
+            n_components=args.n_components,
+            n_time_bins=args.n_time_bins,
+            output_file=args.output,
+            max_samples=args.max_samples
+        )
 
